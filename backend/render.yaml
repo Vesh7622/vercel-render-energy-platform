@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: energy-platform-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn energy_platform_backend:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENERGY_DB_PATH
+        value: data/energy_platform.db
+      - key: ENERGY_LOOKBACK
+        value: 24

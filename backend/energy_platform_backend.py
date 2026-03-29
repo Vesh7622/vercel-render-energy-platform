@@ -65,10 +65,16 @@ def xai():
     return get_xai()
 
 
-@app.get("/api/forecast-history")
-def forecast_history():
-    return get_forecast_history()
-
+@app.get("/api/forecast")
+def api_forecast():
+    try:
+        result = run_forecast()  # or whatever function you use
+        return result
+    except Exception as e:
+        import traceback
+        print("FORECAST ERROR:", str(e))
+        print(traceback.format_exc())
+        return {"error": str(e)}
 
 @app.get("/api/freshness")
 def freshness():

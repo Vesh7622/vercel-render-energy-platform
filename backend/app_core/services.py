@@ -90,14 +90,10 @@ def _build_engineered_features(base_df: pd.DataFrame) -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     df = df.set_index("observed_at")
-
     df = df.resample("15min").interpolate(method="time").ffill().bfill()
 
     df["load_actual_mw"] = df["total_generation_mw"]
-
-    # Temporary proxy until you connect a real load forecast source
     df["load_forecast_mw"] = df["load_actual_mw"]
-
     df["temperature_c"] = df["temperature_2m"]
     df["rad_direct"] = df["direct_radiation"]
     df["rad_diffuse"] = df["diffuse_radiation"]
@@ -266,10 +262,19 @@ def get_performance() -> dict:
     metric_row = latest_row("model_metrics", "created_at")
     training_row = latest_row("training_runs", "created_at")
     loss_df = read_sql(
-        "SELECT epoch, train_loss, val_loss FROM training_loss_history ORDER BY epoch ASC"
+        """
+        SELECT epoch, train_loss, val_loss
+        FROM training_loss_history
+        ORDER BY epoch ASC
+        """
     )
     pred_df = read_sql(
-        "SELECT observed_at, actual_mw, predicted_mw FROM prediction_evaluations ORDER BY observed_at ASC LIMIT 200"
+        """
+        SELECT observed_at, actual_mw, predicted_mw
+        FROM prediction_evaluations
+        ORDER BY observed_at ASC
+        LIMIT 300
+        """
     )
 
     return {
@@ -307,7 +312,11 @@ def get_performance() -> dict:
 
 def get_comparison() -> dict:
     df = read_sql(
-        "SELECT model_name, rmse, mae, mse, training_time_sec, selected FROM baseline_comparisons ORDER BY rmse ASC"
+        """
+        SELECT model_name, rmse, mae, mse, training_time_sec, selected
+        FROM baseline_comparisons
+        ORDER BY rmse ASC
+        """
     )
 
     return {
@@ -449,6 +458,7 @@ def run_scenario(payload: ScenarioPayload) -> dict:
         modified.loc[idx, "rad_direct"] = float(modified.loc[idx, "rad_direct"]) * payload.radiationMultiplier
         modified.loc[idx, "rad_diffuse"] = float(modified.loc[idx, "rad_diffuse"]) * payload.radiationMultiplier
         modified.loc[idx, "load_forecast_mw"] = float(modified.loc[idx, "load_forecast_mw"]) * payload.windMultiplier
+
         scenario_value = _predict_from_features(modified)
 
     delta = scenario_value - baseline

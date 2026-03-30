@@ -344,8 +344,8 @@ def get_xai() -> dict:
         "SELECT feature_name, importance FROM xai_global_importance ORDER BY importance DESC"
     )
     local_df = read_sql(
-        "SELECT feature_name, contribution FROM xai_local_explanations ORDER BY ABS(contribution) DESC"
-    )
+    "SELECT feature_name, contribution FROM xai_local_explanations ORDER BY ABS(contribution) DESC"
+)
 
     return {
         "summary": (

@@ -9,6 +9,8 @@ def reset_tables(conn):
         "training_loss_history",
         "prediction_evaluations",
         "baseline_comparisons",
+        "xai_global_importance",
+        "xai_local_explanations",
     ]
     for t in tables:
         conn.execute(f"DELETE FROM {t}")
@@ -91,6 +93,51 @@ def insert_baselines(conn):
         """, r)
 
 
+def insert_xai(conn):
+    # Global importance values
+    global_rows = [
+        ("load_actual_mw", 0.2314),
+        ("load_forecast_mw", 0.1812),
+        ("temperature_c", 0.0978),
+        ("rad_direct", 0.1224),
+        ("rad_diffuse", 0.0841),
+        ("sin_hour", 0.0542),
+        ("cos_hour", 0.0489),
+        ("lag_15m", 0.1411),
+        ("lag_30m", 0.1015),
+        ("roll_mean_past_1h", 0.0937),
+        ("roll_std_past_1h", 0.0386),
+        ("is_weekend", 0.0184),
+    ]
+
+    for feature_name, importance in global_rows:
+        conn.execute("""
+            INSERT INTO xai_global_importance (feature_name, importance)
+            VALUES (?, ?)
+        """, (feature_name, importance))
+
+    # Local explanation values for one forecast instance
+    local_rows = [
+        ("load_actual_mw", 118.5),
+        ("lag_15m", 93.2),
+        ("load_forecast_mw", 76.4),
+        ("rad_direct", 54.7),
+        ("rad_diffuse", 31.8),
+        ("temperature_c", -22.4),
+        ("roll_mean_past_1h", 19.1),
+        ("roll_std_past_1h", -8.7),
+        ("is_weekend", -5.2),
+        ("sin_hour", 4.8),
+        ("cos_hour", -3.6),
+    ]
+
+    for feature_name, contribution in local_rows:
+        conn.execute("""
+            INSERT INTO xai_local_explanations (feature_name, contribution)
+            VALUES (?, ?)
+        """, (feature_name, contribution))
+
+
 def main():
     initialize_schema()
 
@@ -101,9 +148,10 @@ def main():
         insert_loss(conn)
         insert_predictions(conn)
         insert_baselines(conn)
+        insert_xai(conn)
         conn.commit()
 
-    print("✅ Results populated successfully")
+    print("✅ Results + XAI populated successfully")
 
 
 if __name__ == "__main__":

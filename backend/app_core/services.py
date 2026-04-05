@@ -1,9 +1,13 @@
 import json
 from datetime import datetime, timezone
-
 import joblib
 import numpy as np
 import pandas as pd
+
+
+from app_core.weather_client import fetch_live_weather
+
+
 
 from app_core.config import (
     DB_PATH,
@@ -246,6 +250,47 @@ def get_overview() -> dict:
     }
 
 
+def _upsert_weather_live(weather_df: pd.DataFrame) -> None:
+    if weather_df.empty:
+        return
+
+    with get_connection() as conn:
+        for _, row in weather_df.iterrows():
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO weather_observations (
+                    observed_at,
+                    temperature_2m,
+                    relative_humidity_2m,
+                    cloud_cover,
+                    wind_speed_10m,
+                    wind_speed_80m,
+                    shortwave_radiation,
+                    direct_radiation,
+                    diffuse_radiation,
+                    sunshine_duration,
+                    source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row["observed_at"].isoformat(),
+                    row["temperature_2m"],
+                    row["relative_humidity_2m"],
+                    row["cloud_cover"],
+                    row["wind_speed_10m"],
+                    row["wind_speed_80m"],
+                    row["shortwave_radiation"],
+                    row["direct_radiation"],
+                    row["diffuse_radiation"],
+                    row["sunshine_duration"],
+                    row["source"],
+                ),
+            )
+        conn.commit()
+
+def _refresh_live_weather() -> None:
+    weather_df = fetch_live_weather()
+    _upsert_weather_live(weather_df)
 def get_forecast() -> dict:
     feature_df = _prepare_feature_window()
     next_forecast = _predict_from_features(feature_df)

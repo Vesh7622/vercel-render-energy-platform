@@ -1,14 +1,12 @@
 import json
 from datetime import datetime, timezone
+
 import joblib
 import numpy as np
 import pandas as pd
 
-
 from app_core.weather_client import fetch_live_weather
-
-
-
+from app_core.entsoe_client import fetch_load_data
 from app_core.config import (
     DB_PATH,
     MODEL_PATH,
@@ -58,6 +56,17 @@ FEATURE_COLUMNS = [
     "roll_std_past_1h",
 ]
 
+import math
+
+def clean_json(data):
+    if isinstance(data, dict):
+        return {k: clean_json(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_json(v) for v in data]
+    elif isinstance(data, float):
+        if math.isnan(data) or math.isinf(data):
+            return None
+    return data
 
 def init_backend() -> None:
     global MODEL, FEATURE_SCALER, TARGET_SCALER
@@ -82,6 +91,18 @@ def _model_ready() -> bool:
     return MODEL is not None and FEATURE_SCALER is not None and TARGET_SCALER is not None
 
 
+def _safe_float(value, default=0.0) -> float:
+    try:
+        if value is None or pd.isna(value):
+            return float(default)
+        v = float(value)
+        if math.isnan(v) or math.isinf(v):
+            return float(default)
+        return v
+    except Exception:
+        return float(default)
+
+
 def _build_engineered_features(base_df: pd.DataFrame) -> pd.DataFrame:
     if base_df.empty:
         return pd.DataFrame(columns=["observed_at"] + FEATURE_COLUMNS)
@@ -91,13 +112,24 @@ def _build_engineered_features(base_df: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(subset=["observed_at"]).sort_values("observed_at").drop_duplicates("observed_at")
 
     for col in ["total_generation_mw", "temperature_2m", "direct_radiation", "diffuse_radiation"]:
+        if col not in df.columns:
+            df[col] = np.nan
         df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    if "load_forecast_mw" not in df.columns:
+        df["load_forecast_mw"] = np.nan
+    df["load_forecast_mw"] = pd.to_numeric(df["load_forecast_mw"], errors="coerce")
 
     df = df.set_index("observed_at")
     df = df.resample("15min").interpolate(method="time").ffill().bfill()
 
+    # Keep DB compatibility: total_generation_mw stores actual load values
     df["load_actual_mw"] = df["total_generation_mw"]
-    df["load_forecast_mw"] = df["load_actual_mw"]
+
+    # Preserve real forecast if available; otherwise fall back to actual
+    df["load_forecast_mw"] = df["load_forecast_mw"].ffill().bfill()
+    df["load_forecast_mw"] = df["load_forecast_mw"].fillna(df["load_actual_mw"])
+
     df["temperature_c"] = df["temperature_2m"]
     df["rad_direct"] = df["direct_radiation"]
     df["rad_diffuse"] = df["diffuse_radiation"]
@@ -140,9 +172,17 @@ def _build_engineered_features(base_df: pd.DataFrame) -> pd.DataFrame:
 def _prepare_feature_window() -> pd.DataFrame:
     base_df = read_sql(
         """
-        SELECT observed_at, total_generation_mw, temperature_2m, direct_radiation, diffuse_radiation
-        FROM model_features
-        ORDER BY observed_at DESC
+        SELECT
+            mf.observed_at,
+            mf.total_generation_mw,
+            mf.temperature_2m,
+            mf.direct_radiation,
+            mf.diffuse_radiation,
+            go.load_forecast_mw
+        FROM model_features mf
+        LEFT JOIN generation_observations go
+            ON mf.observed_at = go.observed_at
+        ORDER BY mf.observed_at DESC
         LIMIT 96
         """
     ).sort_values("observed_at")
@@ -216,34 +256,34 @@ def get_overview() -> dict:
         "SELECT observed_at, temperature_2m, wind_speed_10m, shortwave_radiation FROM weather_observations ORDER BY observed_at DESC LIMIT 24"
     ).sort_values("observed_at")
 
-    latest_generation = float(actual_df.iloc[-1]["total_generation_mw"]) if not actual_df.empty else 0.0
-    latest_temperature = float(weather_df.iloc[-1]["temperature_2m"]) if not weather_df.empty else 0.0
+    latest_load = _safe_float(actual_df.iloc[-1]["total_generation_mw"]) if not actual_df.empty else 0.0
+    latest_temperature = _safe_float(weather_df.iloc[-1]["temperature_2m"]) if not weather_df.empty else 0.0
 
     return {
-        "latestGenerationMw": round(latest_generation, 2),
+        "latestGenerationMw": round(latest_load, 2),  # kept for frontend compatibility
         "latestTemperatureC": round(latest_temperature, 2),
         "lookbackWindow": ENERGY_LOOKBACK,
         "storedForecasts": table_count("forecasts"),
         "actualSeries": [
             {
                 "time": pd.to_datetime(row["observed_at"]).strftime("%H:%M"),
-                "generation": round(float(row["total_generation_mw"]), 2),
+                "generation": round(_safe_float(row["total_generation_mw"]), 2),  # kept for frontend compatibility
             }
             for _, row in actual_df.iterrows()
         ],
         "forecastSeries": [
             {
                 "time": pd.to_datetime(row["forecast_for"]).strftime("%H:%M"),
-                "forecast": round(float(row["forecast_generation_mw"]), 2),
+                "forecast": round(_safe_float(row["forecast_generation_mw"]), 2),
             }
             for _, row in forecast_df.iterrows()
         ],
         "weatherSeries": [
             {
                 "time": pd.to_datetime(row["observed_at"]).strftime("%H:%M"),
-                "temperature": round(float(row["temperature_2m"]), 2),
-                "windSpeed": round(float(row["wind_speed_10m"]), 2),
-                "radiation": round(float(row["shortwave_radiation"]), 2),
+                "temperature": round(_safe_float(row["temperature_2m"]), 2),
+                "windSpeed": round(_safe_float(row["wind_speed_10m"]), 2),
+                "radiation": round(_safe_float(row["shortwave_radiation"]), 2),
             }
             for _, row in weather_df.iterrows()
         ],
@@ -273,35 +313,124 @@ def _upsert_weather_live(weather_df: pd.DataFrame) -> None:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    row["observed_at"].isoformat(),
-                    row["temperature_2m"],
-                    row["relative_humidity_2m"],
-                    row["cloud_cover"],
-                    row["wind_speed_10m"],
-                    row["wind_speed_80m"],
-                    row["shortwave_radiation"],
-                    row["direct_radiation"],
-                    row["diffuse_radiation"],
-                    row["sunshine_duration"],
-                    row["source"],
+                    pd.to_datetime(row["observed_at"], utc=True).isoformat(),
+                    _safe_float(row.get("temperature_2m"), None) if pd.notnull(row.get("temperature_2m")) else None,
+                    _safe_float(row.get("relative_humidity_2m"), None) if pd.notnull(row.get("relative_humidity_2m")) else None,
+                    _safe_float(row.get("cloud_cover"), None) if pd.notnull(row.get("cloud_cover")) else None,
+                    _safe_float(row.get("wind_speed_10m"), None) if pd.notnull(row.get("wind_speed_10m")) else None,
+                    _safe_float(row.get("wind_speed_80m"), None) if pd.notnull(row.get("wind_speed_80m")) else None,
+                    _safe_float(row.get("shortwave_radiation"), None) if pd.notnull(row.get("shortwave_radiation")) else None,
+                    _safe_float(row.get("direct_radiation"), None) if pd.notnull(row.get("direct_radiation")) else None,
+                    _safe_float(row.get("diffuse_radiation"), None) if pd.notnull(row.get("diffuse_radiation")) else None,
+                    None,
+                    row.get("source", "open-meteo"),
                 ),
             )
         conn.commit()
 
+
 def _refresh_live_weather() -> None:
     weather_df = fetch_live_weather()
     _upsert_weather_live(weather_df)
+
+
+def _upsert_load_live(load_df: pd.DataFrame) -> None:
+    if load_df.empty:
+        return
+
+    with get_connection() as conn:
+        for _, row in load_df.iterrows():
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO generation_observations (
+                    observed_at,
+                    total_generation_mw,
+                    load_forecast_mw,
+                    source
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    pd.to_datetime(row["observed_at"], utc=True).isoformat(),
+                    _safe_float(row["load_actual_mw"], None) if pd.notnull(row["load_actual_mw"]) else None,
+                    _safe_float(row["load_forecast_mw"], None) if pd.notnull(row["load_forecast_mw"]) else None,
+                    row.get("source", "entsoe-load-hidden-endpoint"),
+                ),
+            )
+        conn.commit()
+
+
+def _rebuild_model_features() -> None:
+    base_df = read_sql(
+        """
+        SELECT
+            g.observed_at,
+            g.total_generation_mw,
+            w.temperature_2m,
+            w.direct_radiation,
+            w.diffuse_radiation
+        FROM generation_observations g
+        LEFT JOIN weather_observations w
+            ON g.observed_at = w.observed_at
+        ORDER BY g.observed_at ASC
+        """
+    )
+
+    engineered = _build_engineered_features(base_df)
+    if engineered.empty:
+        return
+
+    with get_connection() as conn:
+        conn.execute("DELETE FROM model_features")
+        for _, row in engineered.iterrows():
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO model_features (
+                    observed_at,
+                    total_generation_mw,
+                    temperature_2m,
+                    direct_radiation,
+                    diffuse_radiation,
+                    hour_of_day,
+                    day_of_week,
+                    month_of_year
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    pd.to_datetime(row["observed_at"], utc=True).isoformat(),
+                    _safe_float(row["load_actual_mw"]),
+                    _safe_float(row["temperature_c"]),
+                    _safe_float(row["rad_direct"]),
+                    _safe_float(row["rad_diffuse"]),
+                    int(row["hour"]),
+                    int(row["dayofweek"]),
+                    int(row["month"]),
+                ),
+            )
+        conn.commit()
+
+
+def _refresh_live_load() -> None:
+    load_df = fetch_load_data()
+    _upsert_load_live(load_df)
+    _rebuild_model_features()
+
+
 def get_forecast() -> dict:
+    _refresh_live_load()
+    _refresh_live_weather()
+    _rebuild_model_features()
+
     feature_df = _prepare_feature_window()
     next_forecast = _predict_from_features(feature_df)
 
-    return {
-        "nextForecastMw": round(next_forecast, 2),
+    result = {
+        "nextForecastMw": round(_safe_float(next_forecast), 2),
         "generatedAt": _now_iso(),
         "horizonHours": 1,
-        "recentInputs": feature_df.tail(8).where(pd.notnull(feature_df), None).to_dict(orient="records"),
+        "recentInputs": feature_df.tail(8).to_dict(orient="records"),
     }
 
+    return clean_json(result)
 
 def get_performance() -> dict:
     metric_row = latest_row("model_metrics", "created_at")
@@ -324,11 +453,11 @@ def get_performance() -> dict:
 
     return {
         "metrics": {
-            "rmse": round(float(metric_row["rmse"]), 2) if metric_row else 0.0,
-            "mae": round(float(metric_row["mae"]), 2) if metric_row else 0.0,
-            "mse": round(float(metric_row["mse"]), 2) if metric_row else 0.0,
-            "mape": round(float(metric_row["mape"]), 2) if metric_row else 0.0,
-            "accuracy": round(float(metric_row["accuracy"]), 2) if metric_row else 0.0,
+            "rmse": round(_safe_float(metric_row["rmse"]), 2) if metric_row else 0.0,
+            "mae": round(_safe_float(metric_row["mae"]), 2) if metric_row else 0.0,
+            "mse": round(_safe_float(metric_row["mse"]), 2) if metric_row else 0.0,
+            "mape": round(_safe_float(metric_row["mape"]), 2) if metric_row else 0.0,
+            "accuracy": round(_safe_float(metric_row["accuracy"]), 2) if metric_row else 0.0,
         },
         "trainingInfo": {
             "lastTrainingAt": training_row["completed_at"] if training_row else None,
@@ -339,16 +468,16 @@ def get_performance() -> dict:
         "lossCurve": [
             {
                 "epoch": int(row["epoch"]),
-                "trainLoss": float(row["train_loss"]) if row["train_loss"] is not None else 0.0,
-                "valLoss": float(row["val_loss"]) if row["val_loss"] is not None else 0.0,
+                "trainLoss": _safe_float(row["train_loss"]),
+                "valLoss": _safe_float(row["val_loss"]),
             }
             for _, row in loss_df.iterrows()
         ],
         "actualVsPredicted": [
             {
                 "time": pd.to_datetime(row["observed_at"]).strftime("%m-%d %H:%M"),
-                "actual": round(float(row["actual_mw"]), 2),
-                "predicted": round(float(row["predicted_mw"]), 2),
+                "actual": round(_safe_float(row["actual_mw"]), 2),
+                "predicted": round(_safe_float(row["predicted_mw"]), 2),
             }
             for _, row in pred_df.iterrows()
         ],
@@ -368,10 +497,10 @@ def get_comparison() -> dict:
         "models": [
             {
                 "name": str(row["model_name"]),
-                "rmse": round(float(row["rmse"]), 2),
-                "mae": round(float(row["mae"]), 2),
-                "mse": round(float(row["mse"]), 2),
-                "trainingTimeSec": round(float(row["training_time_sec"]), 2),
+                "rmse": round(_safe_float(row["rmse"]), 2),
+                "mae": round(_safe_float(row["mae"]), 2),
+                "mse": round(_safe_float(row["mse"]), 2),
+                "trainingTimeSec": round(_safe_float(row["training_time_sec"]), 2),
                 "selected": bool(int(row["selected"])),
             }
             for _, row in df.iterrows()
@@ -389,8 +518,8 @@ def get_xai() -> dict:
         "SELECT feature_name, importance FROM xai_global_importance ORDER BY importance DESC"
     )
     local_df = read_sql(
-    "SELECT feature_name, contribution FROM xai_local_explanations ORDER BY ABS(contribution) DESC"
-)
+        "SELECT feature_name, contribution FROM xai_local_explanations ORDER BY ABS(contribution) DESC"
+    )
 
     return {
         "summary": (
@@ -399,11 +528,11 @@ def get_xai() -> dict:
             else "No explainability data available yet."
         ),
         "featureImportance": [
-            {"feature": str(row["feature_name"]), "importance": round(float(row["importance"]), 4)}
+            {"feature": str(row["feature_name"]), "importance": round(_safe_float(row["importance"]), 4)}
             for _, row in global_df.iterrows()
         ],
         "localExplanation": [
-            {"feature": str(row["feature_name"]), "contribution": round(float(row["contribution"]), 2)}
+            {"feature": str(row["feature_name"]), "contribution": round(_safe_float(row["contribution"]), 2)}
             for _, row in local_df.iterrows()
         ],
     }
@@ -419,9 +548,9 @@ def get_forecast_history() -> dict:
             {
                 "issuedAt": row["issued_at"],
                 "forecastFor": row["forecast_for"],
-                "predictedMw": round(float(row["predicted_mw"]), 2),
-                "actualMw": round(float(row["actual_mw"]), 2),
-                "absoluteError": round(float(row["absolute_error"]), 2),
+                "predictedMw": round(_safe_float(row["predicted_mw"]), 2),
+                "actualMw": round(_safe_float(row["actual_mw"]), 2),
+                "absoluteError": round(_safe_float(row["absolute_error"]), 2),
             }
             for _, row in df.iterrows()
         ]
@@ -449,7 +578,12 @@ def get_freshness() -> dict:
 
 def get_data_status() -> dict:
     generation_rows = read_sql(
-        "SELECT observed_at, total_generation_mw, generation_wind_mw, generation_solar_mw FROM generation_observations ORDER BY observed_at DESC LIMIT 20"
+        """
+        SELECT observed_at, total_generation_mw, load_forecast_mw
+        FROM generation_observations
+        ORDER BY observed_at DESC
+        LIMIT 20
+        """
     ).sort_values("observed_at")
 
     weather_rows = read_sql(
@@ -458,18 +592,20 @@ def get_data_status() -> dict:
 
     feature_rows = read_sql(
         """
-        SELECT observed_at, total_generation_mw, temperature_2m, wind_speed_80m, hour_of_day
+        SELECT observed_at, total_generation_mw, temperature_2m, hour_of_day
         FROM model_features
         ORDER BY observed_at DESC
         LIMIT 20
         """
     ).sort_values("observed_at")
 
-    return {
-        "generationRows": generation_rows.where(pd.notnull(generation_rows), None).to_dict(orient="records"),
-        "weatherRows": weather_rows.where(pd.notnull(weather_rows), None).to_dict(orient="records"),
-        "featureRows": feature_rows.where(pd.notnull(feature_rows), None).to_dict(orient="records"),
+    result = {
+        "generationRows": generation_rows.to_dict(orient="records"),
+        "weatherRows": weather_rows.to_dict(orient="records"),
+        "featureRows": feature_rows.to_dict(orient="records"),
     }
+
+    return clean_json(result)
 
 
 def get_system_status() -> dict:
@@ -499,10 +635,10 @@ def run_scenario(payload: ScenarioPayload) -> dict:
         modified = feature_df.copy()
         idx = modified.index[-1]
 
-        modified.loc[idx, "temperature_c"] = float(modified.loc[idx, "temperature_c"]) + payload.temperatureDelta
-        modified.loc[idx, "rad_direct"] = float(modified.loc[idx, "rad_direct"]) * payload.radiationMultiplier
-        modified.loc[idx, "rad_diffuse"] = float(modified.loc[idx, "rad_diffuse"]) * payload.radiationMultiplier
-        modified.loc[idx, "load_forecast_mw"] = float(modified.loc[idx, "load_forecast_mw"]) * payload.windMultiplier
+        modified.loc[idx, "temperature_c"] = _safe_float(modified.loc[idx, "temperature_c"]) + payload.temperatureDelta
+        modified.loc[idx, "rad_direct"] = _safe_float(modified.loc[idx, "rad_direct"]) * payload.radiationMultiplier
+        modified.loc[idx, "rad_diffuse"] = _safe_float(modified.loc[idx, "rad_diffuse"]) * payload.radiationMultiplier
+        modified.loc[idx, "load_forecast_mw"] = _safe_float(modified.loc[idx, "load_forecast_mw"]) * payload.windMultiplier
 
         scenario_value = _predict_from_features(modified)
 

@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+import pandas as pd
+from app_core.entsoe_client import fetch_load_data
 from app_core.schemas import ScenarioPayload
 from app_core.services import (
     init_backend,
@@ -94,3 +95,8 @@ def system_status():
 @app.post("/api/scenario")
 def scenario(payload: ScenarioPayload):
     return run_scenario(payload)
+
+@app.get("/api/live-load")
+def api_live_load():
+    df = fetch_load_data()
+    return df.tail(20).where(pd.notnull(df), None).to_dict(orient="records")

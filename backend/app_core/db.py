@@ -13,6 +13,110 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _get_existing_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    if not _table_exists(conn, table_name):
+        return set()
+
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row["name"] for row in rows}
+
+
+def _add_missing_columns(
+    conn: sqlite3.Connection,
+    table_name: str,
+    expected_columns: dict[str, str],
+) -> None:
+    existing = _get_existing_columns(conn, table_name)
+
+    for col_name, col_type in expected_columns.items():
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
+
+
+def run_migrations(conn: sqlite3.Connection) -> None:
+    # generation_observations
+    _add_missing_columns(
+        conn,
+        "generation_observations",
+        {
+            "generation_wind_mw": "REAL",
+            "generation_solar_mw": "REAL",
+            "generation_other_mw": "REAL",
+            "load_forecast_mw": "REAL",
+            "source": "TEXT",
+        },
+    )
+
+    # weather_observations
+    _add_missing_columns(
+        conn,
+        "weather_observations",
+        {
+            "relative_humidity_2m": "REAL",
+            "cloud_cover": "REAL",
+            "wind_speed_10m": "REAL",
+            "wind_speed_80m": "REAL",
+            "shortwave_radiation": "REAL",
+            "direct_radiation": "REAL",
+            "diffuse_radiation": "REAL",
+            "sunshine_duration": "REAL",
+            "source": "TEXT",
+        },
+    )
+
+    # model_features
+    _add_missing_columns(
+        conn,
+        "model_features",
+        {
+            "relative_humidity_2m": "REAL",
+            "cloud_cover": "REAL",
+            "wind_speed_10m": "REAL",
+            "wind_speed_80m": "REAL",
+            "shortwave_radiation": "REAL",
+            "direct_radiation": "REAL",
+            "diffuse_radiation": "REAL",
+            "sunshine_duration": "REAL",
+            "hour_of_day": "INTEGER",
+            "day_of_week": "INTEGER",
+            "month_of_year": "INTEGER",
+        },
+    )
+
+    # forecasts
+    _add_missing_columns(
+        conn,
+        "forecasts",
+        {
+            "forecast_lower_mw": "REAL",
+            "forecast_upper_mw": "REAL",
+            "forecast_type": "TEXT",
+        },
+    )
+
+    # scenario_runs
+    _add_missing_columns(
+        conn,
+        "scenario_runs",
+        {
+            "changed_variables": "TEXT",
+            "baseline_generation_mw": "REAL",
+            "scenario_generation_mw": "REAL",
+            "delta_mw": "REAL",
+            "explanation": "TEXT",
+        },
+    )
+
+    conn.commit()
+
 def initialize_schema() -> None:
     with get_connection() as conn:
         conn.executescript(
@@ -40,6 +144,7 @@ def initialize_schema() -> None:
                 generation_wind_mw REAL,
                 generation_solar_mw REAL,
                 generation_other_mw REAL,
+                load_forecast_mw REAL,
                 source TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
@@ -169,6 +274,8 @@ def initialize_schema() -> None:
             );
             """
         )
+
+        run_migrations(conn)
         conn.commit()
 
 

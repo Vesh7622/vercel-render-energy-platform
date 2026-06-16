@@ -255,7 +255,6 @@ const tabs = [
   "performance",
   "comparison",
   "xai",
-  "history",
   "scenario",
   "data",
   "system",
@@ -272,7 +271,6 @@ const tabMeta: Record<
   performance: { label: "Performance", icon: <TrendingUp className="h-4 w-4" /> },
   comparison: { label: "Model Comparison", icon: <Activity className="h-4 w-4" /> },
   xai: { label: "Explainability", icon: <Sparkles className="h-4 w-4" /> },
-  history: { label: "History", icon: <Database className="h-4 w-4" /> },
   scenario: { label: "What-if Scenario", icon: <CloudSun className="h-4 w-4" /> },
   data: { label: "Data", icon: <Wind className="h-4 w-4" /> },
   system: { label: "System", icon: <Settings className="h-4 w-4" /> },
@@ -621,14 +619,9 @@ export default function App() {
               </div>
               <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">Netherlands Electricity Load Forecasting Dashboard</h1>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
-                A real-time dashboard for monitoring observed electricity load, next-hour demand forecasts, weather inputs, model performance, and explainability using a deployed backend.
+                A real-time dashboard for monitoring observed electricity load, next-hour demand forecasts, weather inputs and model performance using a deployed backend.
               </p>
-              <div className="mt-4 flex flex-wrap gap-3 text-xs text-slate-300">
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{overview.lookbackWindow}-hour lookback</span>
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{overview.storedForecasts} stored forecasts</span>
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">API: {API_BASE || "same-origin"}</span>
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">Last updated: {formatDateTime(health.latestRefresh)}</span>
-              </div>
+              
             </div>
 
             <button
@@ -663,7 +656,7 @@ export default function App() {
           <StatCard
             title="Model loaded"
             value={health.modelLoaded ? "Yes" : "No"}
-            subtitle="Forecasting model availability"
+            subtitle="Is forecasting model available?"
             icon={<Database className="h-5 w-5" />}
           />
         </div>
@@ -909,52 +902,6 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === "history" && (
-          <div className="space-y-6">
-            <ErrorBanner message={errors.history} />
-            <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
-              <SectionCard title="Forecast archive" subtitle="Predicted versus actual load values from /api/forecast-history.">
-                <div className="h-[340px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={historyChartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="time" stroke="#64748b" />
-                      <YAxis stroke="#64748b" />
-                      <Tooltip />
-                      <Legend />
-                      <Line type="monotone" dataKey="predicted" dot={false} stroke="#0ea5e9" strokeWidth={2.5} name="Predicted load" />
-                      <Line type="monotone" dataKey="actual" dot={false} stroke="#0f172a" strokeWidth={2.5} name="Actual load" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </SectionCard>
-              <SectionCard title="Recent forecast errors" subtitle="Absolute error from archived forecast results.">
-                <div className="h-[340px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={historyChartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="time" stroke="#64748b" />
-                      <YAxis stroke="#64748b" />
-                      <Tooltip />
-                      <Bar dataKey="error" fill="#f97316" radius={[10, 10, 0, 0]} name="Absolute error" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </SectionCard>
-            </div>
-            <SectionCard title="History table">
-              <DataTable
-                rows={history.rows.map((row) => ({
-                  issued_at: row.issuedAt,
-                  forecast_for: row.forecastFor,
-                  predicted_load_mw: row.predictedMw,
-                  actual_load_mw: row.actualMw,
-                  absolute_error: row.absoluteError,
-                }))}
-              />
-            </SectionCard>
-          </div>
-        )}
 
         {activeTab === "scenario" && (
           <div className="space-y-6">

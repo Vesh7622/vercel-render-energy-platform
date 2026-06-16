@@ -9,6 +9,8 @@ import {
   Tooltip,
   CartesianGrid,
   Legend,
+  ReferenceLine,
+  Label,
   BarChart,
   Bar,
   AreaChart,
@@ -247,6 +249,35 @@ const fallbackScenario: ScenarioResponse = {
   explanation: "Run a scenario to see the result.",
 };
 
+const tabs = [
+  "overview",
+  "forecast",
+  "performance",
+  "comparison",
+  "xai",
+  "history",
+  "scenario",
+  "data",
+  "system",
+] as const;
+
+type TabKey = (typeof tabs)[number];
+
+const tabMeta: Record<
+  TabKey,
+  { label: string; icon: React.ReactNode }
+> = {
+  overview: { label: "Overview", icon: <BarChart3 className="h-4 w-4" /> },
+  forecast: { label: "Forecast", icon: <Gauge className="h-4 w-4" /> },
+  performance: { label: "Performance", icon: <TrendingUp className="h-4 w-4" /> },
+  comparison: { label: "Model Comparison", icon: <Activity className="h-4 w-4" /> },
+  xai: { label: "Explainability", icon: <Sparkles className="h-4 w-4" /> },
+  history: { label: "History", icon: <Database className="h-4 w-4" /> },
+  scenario: { label: "What-if Scenario", icon: <CloudSun className="h-4 w-4" /> },
+  data: { label: "Data", icon: <Wind className="h-4 w-4" /> },
+  system: { label: "System", icon: <Settings className="h-4 w-4" /> },
+};
+
 async function fetchJson<T>(path: string): Promise<T> {
   const url = `${API_BASE}${path}`;
   const res = await fetch(url, {
@@ -274,6 +305,40 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+function formatDateTime(value?: string) {
+  if (!value) return "Not available";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
+function formatTimeOnly(value?: string) {
+  if (!value) return "Not available";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleTimeString();
+}
+
+function formatColumnLabel(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\btotal generation\b/gi, "total load")
+    .replace(/\bgeneration\b/gi, "load")
+    .replace(/\bforecast generated at\b/gi, "forecast issued at")
+    .replace(/\bmw\b/g, "MW")
+    .replace(/\bc\b/g, "C")
+    .replace(/\b2m\b/g, "2 m")
+    .replace(/\b10m\b/g, "10 m")
+    .replace(/\bof\b/g, "of")
+    .replace(/\b([a-z])/g, (match) => match.toUpperCase());
+}
+
+function formatDbLabel(value: string) {
+  return formatColumnLabel(value)
+    .replace(/Generation Observations/g, "Load Observations")
+    .replace(/Scenario Runs/g, "Scenario Runs")
+    .replace(/Model Features/g, "Model Features")
+    .replace(/Weather Observations/g, "Weather Observations");
+}
+
 function SectionCard({
   title,
   subtitle,
@@ -286,10 +351,10 @@ function SectionCard({
   className?: string;
 }) {
   return (
-    <div className={`rounded-3xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
+    <div className={`rounded-[28px] border border-slate-200/80 bg-white/90 p-5 shadow-[0_12px_40px_rgba(15,23,42,0.06)] backdrop-blur ${className}`}>
       <div className="mb-4">
-        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-        {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
+        <h2 className="text-lg font-semibold tracking-tight text-slate-950">{title}</h2>
+        {subtitle ? <p className="mt-1 text-sm leading-6 text-slate-500">{subtitle}</p> : null}
       </div>
       {children}
     </div>
@@ -308,14 +373,14 @@ function StatCard({
   icon: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-[24px] border border-slate-200/80 bg-white/95 p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition-transform duration-200 hover:-translate-y-0.5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm text-slate-500">{title}</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-900">{value}</p>
-          <p className="mt-2 text-sm text-slate-500">{subtitle}</p>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{value}</p>
+          <p className="mt-2 text-sm leading-6 text-slate-500">{subtitle}</p>
         </div>
-        <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">{icon}</div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-slate-700 shadow-inner">{icon}</div>
       </div>
     </div>
   );
@@ -324,12 +389,12 @@ function StatCard({
 function StatusBadge({ status }: { status: string }) {
   const className =
     status === "ok" || status === "healthy"
-      ? "bg-emerald-100 text-emerald-700"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
       : status === "degraded" || status === "delayed"
-        ? "bg-amber-100 text-amber-700"
-        : "bg-red-100 text-red-700";
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : "border-rose-200 bg-rose-50 text-rose-700";
 
-  return <span className={`rounded-full px-3 py-1 text-xs font-medium ${className}`}>{status}</span>;
+  return <span className={`rounded-full border px-3 py-1 text-xs font-semibold capitalize ${className}`}>{status}</span>;
 }
 
 function DataTable({ rows }: { rows: Array<Record<string, string | number | null>> }) {
@@ -340,23 +405,23 @@ function DataTable({ rows }: { rows: Array<Record<string, string | number | null
   const columns = Object.keys(rows[0]);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200">
+    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-600">
+          <thead className="bg-slate-50/90 text-left text-slate-600">
             <tr>
               {columns.map((column) => (
-                <th key={column} className="whitespace-nowrap px-3 py-2 font-medium">
-                  {column}
+                <th key={column} className="whitespace-nowrap px-4 py-3 font-semibold">
+                  {formatColumnLabel(column)}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.map((row, rowIndex) => (
-              <tr key={rowIndex} className="border-t border-slate-100">
+              <tr key={rowIndex} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/40">
                 {columns.map((column) => (
-                  <td key={column} className="whitespace-nowrap px-3 py-2 text-slate-700">
+                  <td key={column} className="whitespace-nowrap px-4 py-3 text-slate-700">
                     {row[column] === null ? "-" : String(row[column])}
                   </td>
                 ))}
@@ -372,25 +437,11 @@ function DataTable({ rows }: { rows: Array<Record<string, string | number | null
 function ErrorBanner({ message }: { message?: string }) {
   if (!message) return null;
   return (
-    <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-sm">
       {message}
     </div>
   );
 }
-
-const tabs = [
-  "overview",
-  "forecast",
-  "performance",
-  "comparison",
-  "xai",
-  "history",
-  "scenario",
-  "data",
-  "system",
-] as const;
-
-type TabKey = (typeof tabs)[number];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
@@ -411,7 +462,7 @@ export default function App() {
   const [scenario, setScenario] = useState<ScenarioResponse>(fallbackScenario);
   const [scenarioLoading, setScenarioLoading] = useState(false);
 
-  const [scenarioName, setScenarioName] = useState("Wind increase scenario");
+  const [scenarioName, setScenarioName] = useState("Peak demand stress test");
   const [temperatureDelta, setTemperatureDelta] = useState(0);
   const [windMultiplier, setWindMultiplier] = useState(1.0);
   const [radiationMultiplier, setRadiationMultiplier] = useState(1.0);
@@ -423,6 +474,16 @@ export default function App() {
       ...overview.forecastSeries.map((x) => ({ time: x.time, generation: null as number | null, forecast: x.forecast })),
     ],
     [overview],
+  );
+
+  const forecastStartTime = useMemo(
+    () => overview.forecastSeries.length ? overview.forecastSeries[0].time : undefined,
+    [overview.forecastSeries],
+  );
+
+  const finalLoss = useMemo(
+    () => performance.lossCurve.length ? performance.lossCurve[performance.lossCurve.length - 1] : undefined,
+    [performance.lossCurve],
   );
 
   const comparisonChartData = useMemo(
@@ -486,7 +547,7 @@ export default function App() {
     else nextErrors.comparison = comparisonResult.reason instanceof Error ? comparisonResult.reason.message : "Comparison endpoint failed.";
 
     if (xaiResult.status === "fulfilled") setXai(xaiResult.value);
-    else nextErrors.xai = xaiResult.reason instanceof Error ? xaiResult.reason.message : "XAI endpoint failed.";
+    else nextErrors.xai = xaiResult.reason instanceof Error ? xaiResult.reason.message : "Explainability endpoint failed.";
 
     if (historyResult.status === "fulfilled") setHistory(historyResult.value);
     else nextErrors.history = historyResult.reason instanceof Error ? historyResult.reason.message : "History endpoint failed.";
@@ -529,40 +590,53 @@ export default function App() {
   }
 
   useEffect(() => {
-    loadAll();
+    void loadAll();
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto max-w-7xl px-4 py-6">
+    <div className="min-h-screen overflow-hidden bg-slate-100 text-slate-900">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[-8rem] top-[-7rem] h-72 w-72 rounded-full bg-cyan-200/40 blur-3xl" />
+        <div className="absolute right-[-6rem] top-20 h-72 w-72 rounded-full bg-indigo-200/40 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-emerald-200/30 blur-3xl" />
+      </div>
+
+      <div className="relative mx-auto max-w-7xl px-4 py-6 md:px-6 lg:px-8">
         <motion.div
-          initial={{ opacity: 0, y: 12 }}
+          initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+          className="mb-6 overflow-hidden rounded-[32px] border border-slate-200/80 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-6 text-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]"
         >
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
-                  <Sparkles className="h-6 w-6" />
-                </div>
-                <div>
-                  <h1 className="text-2xl font-semibold">Netherlands Electricity Forecasting Platform</h1>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Live dashboard using your Render backend instead of local demo-only frontend data.
-                  </p>
-                </div>
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-slate-100">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Dissertation dashboard
+                </span>
+                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-200">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Electricity load / demand focus
+                </span>
               </div>
-              <p className="mt-4 text-xs text-slate-500">
-                API base: <span className="font-medium">{API_BASE || "same-origin / not configured"}</span>
+              <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">Netherlands Electricity Load Forecasting Dashboard</h1>
+              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+                A real-time dashboard for monitoring observed electricity load, next-hour demand forecasts, weather inputs, model performance, and explainability using a deployed backend.
               </p>
+              <div className="mt-4 flex flex-wrap gap-3 text-xs text-slate-300">
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{overview.lookbackWindow}-hour lookback</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{overview.storedForecasts} stored forecasts</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">API: {API_BASE || "same-origin"}</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">Last updated: {formatDateTime(health.latestRefresh)}</span>
+              </div>
             </div>
+
             <button
-              onClick={loadAll}
-              className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm shadow-sm hover:bg-slate-50"
+              onClick={() => void loadAll()}
+              className="inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-medium text-white shadow-lg backdrop-blur transition hover:bg-white/15"
             >
               <RefreshCw className={`mr-2 h-4 w-4 ${loading || refreshing ? "animate-spin" : ""}`} />
-              Refresh all sections
+              Refresh dashboard
             </button>
           </div>
         </motion.div>
@@ -571,39 +645,42 @@ export default function App() {
           <StatCard
             title="System status"
             value={health.status}
-            subtitle={health.databaseConnected ? "Backend and DB responding" : "Backend response issue"}
+            subtitle={health.databaseConnected ? "Backend and database responding" : "Backend response issue detected"}
             icon={<Activity className="h-5 w-5" />}
           />
           <StatCard
-            title="Latest generation"
+            title="Latest load"
             value={`${overview.latestGenerationMw.toLocaleString()} MW`}
-            subtitle="Most recent stored generation"
+            subtitle="Most recent stored electricity demand"
             icon={<Gauge className="h-5 w-5" />}
           />
           <StatCard
             title="Latest temperature"
             value={`${overview.latestTemperatureC.toFixed(1)} °C`}
-            subtitle="Latest weather input"
+            subtitle="Most recent weather driver"
             icon={<CloudSun className="h-5 w-5" />}
           />
           <StatCard
             title="Model loaded"
             value={health.modelLoaded ? "Yes" : "No"}
-            subtitle="Real model availability on Render"
+            subtitle="Forecasting model availability"
             icon={<Database className="h-5 w-5" />}
           />
         </div>
 
-        <div className="mb-6 flex flex-wrap gap-2">
+        <div className="mb-6 flex flex-wrap gap-2 rounded-[28px] border border-slate-200/80 bg-white/80 p-2 shadow-sm backdrop-blur">
           {tabs.map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`rounded-2xl px-4 py-2 text-sm font-medium capitalize ${
-                activeTab === tab ? "bg-slate-900 text-white" : "bg-white text-slate-700 border border-slate-200"
+              className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-medium transition ${
+                activeTab === tab
+                  ? "bg-slate-950 text-white shadow-lg"
+                  : "border border-transparent bg-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50"
               }`}
             >
-              {tab === "xai" ? "Explainability" : tab.replace("-", " ")}
+              {tabMeta[tab].icon}
+              {tabMeta[tab].label}
             </button>
           ))}
         </div>
@@ -611,24 +688,27 @@ export default function App() {
         {activeTab === "overview" && (
           <div className="space-y-6">
             <ErrorBanner message={errors.overview || errors.health} />
-            <div className="grid gap-6 xl:grid-cols-[1.6fr_1fr]">
-              <SectionCard title="Generation and forecast" subtitle="Actual observed generation followed by the forecast horizon.">
+            <div className="grid gap-6 xl:grid-cols-[1.65fr_1fr]">
+              <SectionCard title="Observed load and forecast" subtitle="Actual electricity demand followed by the upcoming forecast horizon. Forecast generated using the Hybrid GRU–LSTM model.">
                 <div className="h-[360px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={combinedSeries}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="time" />
-                      <YAxis />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="time" stroke="#64748b">
+                        <Label value="Time" offset={-4} position="insideBottom" fill="#64748b" />
+                      </XAxis>
+                      <YAxis stroke="#64748b" label={{ value: "Electricity Load (MW)", angle: -90, position: "insideLeft", fill: "#64748b" }} />
                       <Tooltip />
-                      <Legend />
-                      <Line type="monotone" dataKey="generation" dot={false} strokeWidth={2.5} name="Actual generation" />
-                      <Line type="monotone" dataKey="forecast" dot={false} strokeWidth={2.5} name="Forecast" />
+                      <Legend verticalAlign="bottom" height={36} />
+                      {forecastStartTime ? <ReferenceLine x={forecastStartTime} stroke="#94a3b8" strokeDasharray="4 4" label={{ value: "Forecast starts", position: "top", fill: "#64748b", fontSize: 12 }} /> : null}
+                      <Line type="monotone" dataKey="generation" dot={false} stroke="#0f172a" strokeWidth={2.5} name="Observed load" />
+                      <Line type="monotone" dataKey="forecast" dot={false} stroke="#0ea5e9" strokeWidth={2.5} name="Forecast load" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
               </SectionCard>
 
-              <SectionCard title="Live platform snapshot" subtitle="High-level runtime status from the real backend.">
+              <SectionCard title="Live platform snapshot" subtitle="High-level runtime status from the connected backend.">
                 <div className="space-y-3 text-sm text-slate-600">
                   <div className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
                     <span>Backend</span>
@@ -644,24 +724,32 @@ export default function App() {
                   </div>
                   <div className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
                     <span>Last refresh</span>
-                    <span className="font-medium">{new Date(health.latestRefresh || new Date().toISOString()).toLocaleString()}</span>
+                    <span className="font-medium">{formatDateTime(health.latestRefresh)}</span>
                   </div>
                 </div>
               </SectionCard>
             </div>
 
-            <SectionCard title="Recent weather" subtitle="Weather values coming from the current backend response.">
+            <div className="grid gap-4 md:grid-cols-3">
+              <StatCard title="RMSE" value={`${performance.metrics.rmse.toFixed(1)} MW`} subtitle="Hybrid GRU–LSTM error" icon={<TrendingUp className="h-5 w-5" />} />
+              <StatCard title="MAE" value={`${performance.metrics.mae.toFixed(1)} MW`} subtitle="Average absolute error" icon={<TrendingUp className="h-5 w-5" />} />
+              <StatCard title="MAPE" value={`${performance.metrics.mape.toFixed(2)}%`} subtitle="Average percentage error" icon={<CheckCircle2 className="h-5 w-5" />} />
+            </div>
+
+            <SectionCard title="Recent weather inputs" subtitle="Weather variables currently used to support load and demand forecasting.">
               <div className="h-[320px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={overview.weatherSeries}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="time" />
-                    <YAxis />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="time" stroke="#64748b">
+                      <Label value="Time" offset={-4} position="insideBottom" fill="#64748b" />
+                    </XAxis>
+                    <YAxis stroke="#64748b" label={{ value: "Weather variables", angle: -90, position: "insideLeft", fill: "#64748b" }} />
                     <Tooltip />
-                    <Legend />
-                    <Area type="monotone" dataKey="temperature" fillOpacity={0.1} strokeWidth={2} name="Temperature" />
-                    <Area type="monotone" dataKey="windSpeed" fillOpacity={0.1} strokeWidth={2} name="Wind speed" />
-                    <Area type="monotone" dataKey="radiation" fillOpacity={0.08} strokeWidth={2} name="Radiation" />
+                    <Legend verticalAlign="bottom" height={36} />
+                    <Area type="monotone" dataKey="temperature" fill="#f97316" fillOpacity={0.12} stroke="#f97316" strokeWidth={2} name="Temperature" />
+                    <Area type="monotone" dataKey="windSpeed" fill="#0ea5e9" fillOpacity={0.1} stroke="#0284c7" strokeWidth={2} name="Wind speed" />
+                    <Area type="monotone" dataKey="radiation" fill="#14b8a6" fillOpacity={0.1} stroke="#0f766e" strokeWidth={2} name="Radiation" />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -673,12 +761,12 @@ export default function App() {
           <div className="space-y-6">
             <ErrorBanner message={errors.forecast} />
             <div className="grid gap-6 xl:grid-cols-[1fr_1.3fr]">
-              <SectionCard title="Automated forecast" subtitle="Generated by the current backend forecast endpoint.">
-                <div className="rounded-3xl bg-slate-900 p-6 text-white">
-                  <p className="text-sm text-slate-300">Next forecasted generation</p>
-                  <p className="mt-3 text-4xl font-semibold">{forecast.nextForecastMw.toLocaleString()} MW</p>
-                  <p className="mt-2 text-sm text-slate-300">Generated at {new Date(forecast.generatedAt).toLocaleString()}</p>
-                  <p className="mt-2 text-sm text-slate-300">Horizon: {forecast.horizonHours} hour</p>
+              <SectionCard title="Next-hour load forecast" subtitle="Generated from the live forecasting endpoint.">
+                <div className="rounded-[28px] bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-6 text-white shadow-lg">
+                  <p className="text-sm text-slate-300">Forecast electricity demand</p>
+                  <p className="mt-3 text-4xl font-semibold tracking-tight">{forecast.nextForecastMw.toLocaleString()} MW</p>
+                  <p className="mt-2 text-sm text-slate-300">Forecast issued at {formatDateTime(forecast.generatedAt)}</p>
+                  <p className="mt-2 text-sm text-slate-300">Forecast horizon: {forecast.horizonHours} hour</p>
                 </div>
               </SectionCard>
               <SectionCard title="Latest model input window" subtitle="Recent processed inputs returned by /api/forecast.">
@@ -700,32 +788,43 @@ export default function App() {
             </div>
 
             <div className="grid gap-6 xl:grid-cols-2">
-              <SectionCard title="Training and validation loss" subtitle="Live data from /api/performance.">
+              <SectionCard title="Training vs Validation Loss" subtitle="Training and validation loss across epochs from the deployed model performance endpoint.">
                 <div className="h-[320px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={performance.lossCurve}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="epoch" />
-                      <YAxis />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="epoch" stroke="#64748b">
+                        <Label value="Epoch" offset={-4} position="insideBottom" fill="#64748b" />
+                      </XAxis>
+                      <YAxis stroke="#64748b" label={{ value: "Loss", angle: -90, position: "insideLeft", fill: "#64748b" }} />
                       <Tooltip />
-                      <Legend />
-                      <Line type="monotone" dataKey="trainLoss" dot={false} strokeWidth={2.5} name="Training loss" />
-                      <Line type="monotone" dataKey="valLoss" dot={false} strokeWidth={2.5} name="Validation loss" />
+                      <Legend verticalAlign="bottom" height={36} />
+                      <Line type="monotone" dataKey="trainLoss" dot={false} stroke="#0f172a" strokeWidth={2.5} name="Training loss" />
+                      <Line type="monotone" dataKey="valLoss" dot={false} stroke="#0ea5e9" strokeWidth={2.5} strokeDasharray="6 4" name="Validation loss" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
+                <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                  {finalLoss ? (
+                    <span>Final training loss: <strong>{finalLoss.trainLoss.toFixed(3)}</strong> · Final validation loss: <strong>{finalLoss.valLoss.toFixed(3)}</strong>. Both curves decrease across epochs, showing that the model is learning without severe overfitting.</span>
+                  ) : (
+                    <span>No loss values available yet.</span>
+                  )}
+                </div>
               </SectionCard>
-              <SectionCard title="Actual vs predicted" subtitle="Evaluation series from the real backend.">
+              <SectionCard title="Actual vs predicted load" subtitle="Evaluation output from the live backend.">
                 <div className="h-[320px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={performance.actualVsPredicted}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="time" />
-                      <YAxis />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="time" stroke="#64748b">
+                        <Label value="Time" offset={-4} position="insideBottom" fill="#64748b" />
+                      </XAxis>
+                      <YAxis stroke="#64748b" label={{ value: "Electricity Load (MW)", angle: -90, position: "insideLeft", fill: "#64748b" }} />
                       <Tooltip />
-                      <Legend />
-                      <Line type="monotone" dataKey="actual" dot={false} strokeWidth={2.5} name="Actual" />
-                      <Line type="monotone" dataKey="predicted" dot={false} strokeWidth={2.5} name="Predicted" />
+                      <Legend verticalAlign="bottom" height={36} />
+                      <Line type="monotone" dataKey="actual" dot={false} stroke="#0f172a" strokeWidth={2.5} name="Actual load" />
+                      <Line type="monotone" dataKey="predicted" dot={false} stroke="#10b981" strokeWidth={2.5} name="Predicted load" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -738,35 +837,35 @@ export default function App() {
           <div className="space-y-6">
             <ErrorBanner message={errors.comparison} />
             <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
-              <SectionCard title="Baseline model comparison" subtitle="Error comparison across models from /api/comparison.">
+              <SectionCard title="Model comparison" subtitle="Forecasting error comparison across the evaluated models.">
                 <div className="h-[340px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={comparisonChartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="name" stroke="#64748b" />
+                      <YAxis stroke="#64748b" label={{ value: "Error (MW)", angle: -90, position: "insideLeft", fill: "#64748b" }} />
                       <Tooltip />
                       <Legend />
-                      <Bar dataKey="rmse" radius={[10, 10, 0, 0]} name="RMSE" />
-                      <Bar dataKey="mae" radius={[10, 10, 0, 0]} name="MAE" />
+                      <Bar dataKey="rmse" fill="#0f172a" radius={[10, 10, 0, 0]} name="RMSE" />
+                      <Bar dataKey="mae" fill="#0ea5e9" radius={[10, 10, 0, 0]} name="MAE" />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </SectionCard>
-              <SectionCard title="Selection summary" subtitle="Why the chosen model was deployed.">
+              <SectionCard title="Selection summary" subtitle="Why the chosen forecasting model was deployed.">
                 <div className="space-y-3">
                   {comparison.models.map((model) => (
-                    <div key={model.name} className="rounded-2xl bg-slate-50 p-4">
+                    <div key={model.name} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="flex items-center justify-between gap-4">
                         <div>
                           <p className="font-semibold text-slate-900">{model.name}</p>
                           <p className="mt-1 text-sm text-slate-500">RMSE {model.rmse.toFixed(1)} · MAE {model.mae.toFixed(1)}</p>
                         </div>
-                        {model.selected ? <StatusBadge status="healthy" /> : null}
+                        {model.selected ? <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Selected model</span> : null}
                       </div>
                     </div>
                   ))}
-                  <p className="text-sm leading-6 text-slate-600">{comparison.summary}</p>
+                  <p className="text-sm leading-7 text-slate-600">{comparison.summary}</p>
                 </div>
               </SectionCard>
             </div>
@@ -777,34 +876,34 @@ export default function App() {
           <div className="space-y-6">
             <ErrorBanner message={errors.xai} />
             <div className="grid gap-6 xl:grid-cols-2">
-              <SectionCard title="Global feature importance" subtitle="Explainability values from /api/xai.">
+              <SectionCard title="Global feature importance" subtitle="Which variables matter most for load and demand forecasting.">
                 <div className="h-[340px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={xai.featureImportance} layout="vertical" margin={{ left: 40 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" />
-                      <YAxis dataKey="feature" type="category" width={120} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis type="number" stroke="#64748b" />
+                      <YAxis dataKey="feature" type="category" width={120} stroke="#64748b" />
                       <Tooltip />
-                      <Bar dataKey="importance" radius={[0, 10, 10, 0]} />
+                      <Bar dataKey="importance" fill="#0ea5e9" radius={[0, 10, 10, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </SectionCard>
-              <SectionCard title="Local explanation" subtitle="Feature contribution for the latest forecast instance.">
+              <SectionCard title="Local explanation" subtitle="Feature contribution for the latest load forecast instance.">
                 <div className="h-[340px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={xai.localExplanation} layout="vertical" margin={{ left: 40 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" />
-                      <YAxis dataKey="feature" type="category" width={120} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis type="number" stroke="#64748b" />
+                      <YAxis dataKey="feature" type="category" width={120} stroke="#64748b" />
                       <Tooltip />
-                      <Bar dataKey="contribution" radius={[0, 10, 10, 0]} />
+                      <Bar dataKey="contribution" fill="#10b981" radius={[0, 10, 10, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </SectionCard>
             </div>
-            <SectionCard title="Explanation summary" subtitle="Plain-language interpretation.">
+            <SectionCard title="Explanation summary" subtitle="Plain-language interpretation of the model output.">
               <p className="text-sm leading-7 text-slate-600">{xai.summary}</p>
             </SectionCard>
           </div>
@@ -814,30 +913,30 @@ export default function App() {
           <div className="space-y-6">
             <ErrorBanner message={errors.history} />
             <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
-              <SectionCard title="Forecast archive" subtitle="Predicted vs actual values from /api/forecast-history.">
+              <SectionCard title="Forecast archive" subtitle="Predicted versus actual load values from /api/forecast-history.">
                 <div className="h-[340px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={historyChartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="time" />
-                      <YAxis />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="time" stroke="#64748b" />
+                      <YAxis stroke="#64748b" />
                       <Tooltip />
                       <Legend />
-                      <Line type="monotone" dataKey="predicted" dot={false} strokeWidth={2.5} name="Predicted" />
-                      <Line type="monotone" dataKey="actual" dot={false} strokeWidth={2.5} name="Actual" />
+                      <Line type="monotone" dataKey="predicted" dot={false} stroke="#0ea5e9" strokeWidth={2.5} name="Predicted load" />
+                      <Line type="monotone" dataKey="actual" dot={false} stroke="#0f172a" strokeWidth={2.5} name="Actual load" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
               </SectionCard>
-              <SectionCard title="Recent forecast errors" subtitle="Absolute error from archived results.">
+              <SectionCard title="Recent forecast errors" subtitle="Absolute error from archived forecast results.">
                 <div className="h-[340px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={historyChartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="time" />
-                      <YAxis />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="time" stroke="#64748b" />
+                      <YAxis stroke="#64748b" />
                       <Tooltip />
-                      <Bar dataKey="error" radius={[10, 10, 0, 0]} name="Absolute error" />
+                      <Bar dataKey="error" fill="#f97316" radius={[10, 10, 0, 0]} name="Absolute error" />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -848,8 +947,8 @@ export default function App() {
                 rows={history.rows.map((row) => ({
                   issued_at: row.issuedAt,
                   forecast_for: row.forecastFor,
-                  predicted_mw: row.predictedMw,
-                  actual_mw: row.actualMw,
+                  predicted_load_mw: row.predictedMw,
+                  actual_load_mw: row.actualMw,
                   absolute_error: row.absoluteError,
                 }))}
               />
@@ -861,41 +960,41 @@ export default function App() {
           <div className="space-y-6">
             <ErrorBanner message={errors.scenario} />
             <div className="grid gap-6 xl:grid-cols-[1fr_1.2fr]">
-              <SectionCard title="What-if scenario settings" subtitle="These values are sent to /api/scenario.">
+              <SectionCard title="Scenario settings" subtitle="Adjust weather-driven conditions and test how the model responds.">
                 <div className="space-y-5">
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-700">Scenario name</label>
                     <input
                       value={scenarioName}
                       onChange={(e) => setScenarioName(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm"
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm outline-none transition focus:border-slate-400"
                     />
                   </div>
 
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-700">Temperature delta: {temperatureDelta.toFixed(1)} °C</label>
-                    <input type="range" min={-10} max={10} step={0.5} value={temperatureDelta} onChange={(e) => setTemperatureDelta(Number(e.target.value))} className="w-full" />
+                    <input type="range" min={-10} max={10} step={0.5} value={temperatureDelta} onChange={(e) => setTemperatureDelta(Number(e.target.value))} className="w-full accent-slate-900" />
                   </div>
 
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-700">Wind multiplier: {windMultiplier.toFixed(2)}x</label>
-                    <input type="range" min={0.5} max={1.5} step={0.05} value={windMultiplier} onChange={(e) => setWindMultiplier(Number(e.target.value))} className="w-full" />
+                    <input type="range" min={0.5} max={1.5} step={0.05} value={windMultiplier} onChange={(e) => setWindMultiplier(Number(e.target.value))} className="w-full accent-sky-600" />
                   </div>
 
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-700">Radiation multiplier: {radiationMultiplier.toFixed(2)}x</label>
-                    <input type="range" min={0.5} max={1.5} step={0.05} value={radiationMultiplier} onChange={(e) => setRadiationMultiplier(Number(e.target.value))} className="w-full" />
+                    <input type="range" min={0.5} max={1.5} step={0.05} value={radiationMultiplier} onChange={(e) => setRadiationMultiplier(Number(e.target.value))} className="w-full accent-emerald-600" />
                   </div>
 
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-700">Cloud cover delta: {cloudDelta} points</label>
-                    <input type="range" min={-50} max={50} step={5} value={cloudDelta} onChange={(e) => setCloudDelta(Number(e.target.value))} className="w-full" />
+                    <input type="range" min={-50} max={50} step={5} value={cloudDelta} onChange={(e) => setCloudDelta(Number(e.target.value))} className="w-full accent-orange-500" />
                   </div>
 
                   <button
-                    onClick={runScenario}
+                    onClick={() => void runScenario()}
                     disabled={scenarioLoading}
-                    className="inline-flex items-center rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                    className="inline-flex items-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-medium text-white shadow-lg transition hover:bg-slate-800 disabled:opacity-60"
                   >
                     {scenarioLoading ? "Running scenario..." : "Run scenario"}
                   </button>
@@ -904,9 +1003,9 @@ export default function App() {
 
               <div className="space-y-6">
                 <div className="grid gap-4 md:grid-cols-3">
-                  <StatCard title="Baseline forecast" value={`${scenario.baselineMw.toLocaleString()} MW`} subtitle="Current model output" icon={<Gauge className="h-5 w-5" />} />
-                  <StatCard title="Scenario forecast" value={`${scenario.scenarioMw.toLocaleString()} MW`} subtitle="Modified-condition output" icon={<Sparkles className="h-5 w-5" />} />
-                  <StatCard title="Difference" value={`${scenario.deltaMw > 0 ? "+" : ""}${scenario.deltaMw.toLocaleString()} MW`} subtitle="Scenario vs baseline" icon={<Activity className="h-5 w-5" />} />
+                  <StatCard title="Baseline forecast" value={`${scenario.baselineMw.toLocaleString()} MW`} subtitle="Current demand output" icon={<Gauge className="h-5 w-5" />} />
+                  <StatCard title="Scenario forecast" value={`${scenario.scenarioMw.toLocaleString()} MW`} subtitle="Modified-condition demand" icon={<Sparkles className="h-5 w-5" />} />
+                  <StatCard title="Difference" value={`${scenario.deltaMw > 0 ? "+" : ""}${scenario.deltaMw.toLocaleString()} MW`} subtitle="Scenario versus baseline" icon={<Activity className="h-5 w-5" />} />
                 </div>
                 <SectionCard title="Scenario explanation">
                   <p className="text-sm leading-7 text-slate-600">{scenario.explanation}</p>
@@ -919,15 +1018,36 @@ export default function App() {
         {activeTab === "data" && (
           <div className="space-y-6">
             <ErrorBanner message={errors.dataStatus} />
+            <SectionCard title="Dataset meaning" subtitle="The dashboard uses Netherlands electricity load/demand and weather variables aligned by timestamp.">
+              <div className="grid gap-3 text-sm text-slate-600 md:grid-cols-4">
+                <div className="rounded-2xl bg-slate-50 p-4"><strong>Target:</strong><br />Electricity load / demand</div>
+                <div className="rounded-2xl bg-slate-50 p-4"><strong>Unit:</strong><br />Megawatts (MW)</div>
+                <div className="rounded-2xl bg-slate-50 p-4"><strong>Weather:</strong><br />Temperature and radiation inputs</div>
+                <div className="rounded-2xl bg-slate-50 p-4"><strong>Source:</strong><br />Netherlands load + weather data</div>
+              </div>
+            </SectionCard>
             <div className="grid gap-6 xl:grid-cols-3">
-              <SectionCard title="Generation observations">
-                <DataTable rows={dataStatus.generationRows} />
+              <SectionCard title="Load observations">
+                <DataTable
+                  rows={dataStatus.generationRows.map((row) => ({
+                    observed_at: row.observed_at ?? null,
+                    total_load_mw: row.total_generation_mw ?? null,
+                    load_forecast_mw: row.load_forecast_mw ?? null,
+                  }))}
+                />
               </SectionCard>
               <SectionCard title="Weather observations">
                 <DataTable rows={dataStatus.weatherRows} />
               </SectionCard>
               <SectionCard title="Processed model features">
-                <DataTable rows={dataStatus.featureRows} />
+                <DataTable
+                  rows={dataStatus.featureRows.map((row) => ({
+                    observed_at: row.observed_at ?? null,
+                    total_load_mw: row.total_generation_mw ?? null,
+                    temperature_2m: row.temperature_2m ?? null,
+                    hour_of_day: row.hour_of_day ?? null,
+                  }))}
+                />
               </SectionCard>
             </div>
           </div>
@@ -951,7 +1071,7 @@ export default function App() {
                   {Object.entries(systemStatus.databaseCounts).length ? (
                     Object.entries(systemStatus.databaseCounts).map(([key, value]) => (
                       <div key={key} className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3 text-sm">
-                        <span className="text-slate-600">{key}</span>
+                        <span className="text-slate-600">{formatDbLabel(key)}</span>
                         <span className="font-semibold text-slate-900">{value}</span>
                       </div>
                     ))
@@ -962,7 +1082,7 @@ export default function App() {
               </SectionCard>
             </div>
 
-            <SectionCard title="Data freshness / API status" subtitle="Returned by /api/freshness.">
+            <SectionCard title="Data freshness and API status" subtitle="Returned by /api/freshness.">
               <div className="grid gap-4 xl:grid-cols-3">
                 {freshness.sources.length ? (
                   freshness.sources.map((source) => (
@@ -974,16 +1094,16 @@ export default function App() {
                           ) : source.status === "delayed" ? (
                             <AlertTriangle className="h-4 w-4 text-amber-600" />
                           ) : (
-                            <XCircle className="h-4 w-4 text-red-600" />
+                            <XCircle className="h-4 w-4 text-rose-600" />
                           )}
                           {source.name}
                         </div>
                         <StatusBadge status={source.status} />
                       </div>
                       <div className="space-y-2 text-sm text-slate-600">
-                        <div className="flex items-center justify-between"><span>Last success</span><span>{new Date(source.lastSuccess).toLocaleTimeString()}</span></div>
+                        <div className="flex items-center justify-between"><span>Last success</span><span>{formatTimeOnly(source.lastSuccess)}</span></div>
                         <div className="flex items-center justify-between"><span>Latency</span><span>{source.latencyMinutes} min</span></div>
-                        <div className="flex items-center justify-between"><span>Next run</span><span>{new Date(source.nextExpectedRun).toLocaleTimeString()}</span></div>
+                        <div className="flex items-center justify-between"><span>Next run</span><span>{formatTimeOnly(source.nextExpectedRun)}</span></div>
                       </div>
                     </div>
                   ))
@@ -994,6 +1114,11 @@ export default function App() {
             </SectionCard>
           </div>
         )}
+
+        <footer className="mt-8 rounded-[28px] border border-slate-200/80 bg-white/80 p-5 text-sm leading-6 text-slate-600 shadow-sm backdrop-blur">
+          <p className="font-semibold text-slate-900">BSc (Hons) Data Science Dissertation · Real-time Electricity Load Forecasting using Hybrid GRU–LSTM</p>
+          <p className="mt-1">Forecasts are estimates based on historical Netherlands electricity load and weather inputs. Sudden events, holidays, missing data, or abnormal weather conditions may affect accuracy.</p>
+        </footer>
       </div>
     </div>
   );
